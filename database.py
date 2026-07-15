@@ -1,150 +1,164 @@
-from datetime import date
+from __future__ import annotations
 
-import pandas as pd
+import os
+
+import psycopg
 import streamlit as st
-
-from calculations import new_expected_pins
-from database import create_database
-from repository import (
-    get_actuals_for_date,
-    save_actual_rows,
-)
+from psycopg.rows import dict_row
 
 
-create_database()
+def get_database_url() -> str:
+    """
+    Read the persistent PostgreSQL connection string.
 
-st.set_page_config(
-    page_title="Production Actuals",
-    page_icon="🏭",
-    layout="wide",
-)
+    Streamlit Cloud:
+        Add DATABASE_URL in App settings > Secrets.
 
-st.title("🏭 Production Actuals")
-st.caption(
-    "Only SKUs planned for the selected date are shown. "
-    "Planning data is locked. Yield and Actual Pins are editable."
-)
+    Local computer:
+        Add DATABASE_URL to .streamlit/secrets.toml or define it as an
+        environment variable.
+    """
+    database_url = None
 
-selected_date = st.date_input(
-    "Production Date",
-    value=date.today(),
-)
+    try:
+        database_url = st.secrets.get("DATABASE_URL")
+    except Exception:
+        database_url = None
 
-rows = get_actuals_for_date(str(selected_date))
+    database_url = database_url or os.getenv("DATABASE_URL")
 
-if not rows:
-    st.warning(
-        "No SKUs were planned for this date. "
-        "Create or update the plan in Daily Planning first."
-    )
-    st.stop()
+    if not database_url:
+        raise RuntimeError(
+            "DATABASE_URL is missing. Add your Supabase PostgreSQL "
+            "connection string to Streamlit Secrets."
+        )
 
-production_df = pd.DataFrame(
-    [
-        {
-            "SKU": row["sku"],
-            "SKU Desc": row["description"],
-            "Kettle Planned": round(float(row["kettles_planned"]), 2),
-            "Expected Pins": round(float(row["expected_pins"]), 2),
-            "Yield %": round(float(row["yield_percent"]), 2),
-            "New Expected": round(
-                new_expected_pins(
-                    row["expected_pins"],
-                    row["yield_percent"],
-                ),
-                2,
-            ),
-            "Actuals": round(float(row["actual_pins"]), 2),
-        }
-        for row in rows
-    ]
-)
+    database_url = str(database_url).strip()
 
-version_key = f"production_editor_version_{selected_date}"
+    # Some dashboards copy the URI with postgres://.
+    if database_url.startswith("postgres://"):
+        database_url = "postgresql://" + database_url[len("postgres://"):]
 
-if version_key not in st.session_state:
-    st.session_state[version_key] = 0
+    return database_url
 
-editor_key = (
-    f"production_editor_{selected_date}_"
-    f"{st.session_state[version_key]}"
-)
 
-with st.form(
-    key=f"production_form_{selected_date}_{st.session_state[version_key]}",
-    clear_on_submit=False,
-):
-    edited_df = st.data_editor(
-        production_df,
-        use_container_width=True,
-        hide_index=True,
-        num_rows="fixed",
-        disabled=[
-            "SKU",
-            "SKU Desc",
-            "Kettle Planned",
-            "Expected Pins",
-            "New Expected",
-        ],
-        column_config={
-            "SKU": st.column_config.TextColumn(),
-            "SKU Desc": st.column_config.TextColumn(),
-            "Kettle Planned": st.column_config.NumberColumn(
-                format="%.2f",
-            ),
-            "Expected Pins": st.column_config.NumberColumn(
-                format="%.2f",
-            ),
-            "Yield %": st.column_config.NumberColumn(
-                min_value=0.0,
-                step=0.1,
-                format="%.2f",
-                required=True,
-                help="Yield may be above 100%.",
-            ),
-            "New Expected": st.column_config.NumberColumn(
-                format="%.2f",
-                help=(
-                    "Expected Pins multiplied by Yield %. "
-                    "It updates after Save / Update."
-                ),
-            ),
-            "Actuals": st.column_config.NumberColumn(
-                "Actual Pins",
-                min_value=0.0,
-                step=0.25,
-                format="%.2f",
-                required=True,
-            ),
-        },
-        key=editor_key,
+def get_connection() -> psycopg.Connection:
+    return psycopg.connect(
+        get_database_url(),
+        row_factory=dict_row,
+        connect_timeout=15,
     )
 
-    submitted = st.form_submit_button(
-        "Save / Update Production Actuals",
-        type="primary",
-    )
 
-if submitted:
-    edited_df["New Expected"] = edited_df.apply(
-        lambda row: round(
-            new_expected_pins(
-                row["Expected Pins"],
-                row["Yield %"],
-            ),
-            2,
-        ),
-        axis=1,
-    )
+def create_database() -> None:
+    """
+    Create the application tables in the persistent PostgreSQL database.
+    Running this repeatedly is safe.
+    """
+    connection = get_connection()
 
-    save_actual_rows(
-        production_date=str(selected_date),
-        rows=edited_df.to_dict("records"),
-    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sku_master (
+                    id BIGSERIAL PRIMARY KEY,
+                    sku TEXT NOT NULL UNIQUE,
+                    description TEXT NOT NULL,
+                    pins_per_kettle DOUBLE PRECISION NOT NULL
+                        CHECK (pins_per_kettle > 0),
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
 
-    st.session_state[version_key] += 1
-    st.success(
-        "Production actuals were saved. "
-        "New Expected was recalculated from the saved Yield."
-    )
-    st.rerun()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS planned_usage (
+                    id BIGSERIAL PRIMARY KEY,
+                    production_date DATE NOT NULL,
+                    sku TEXT NOT NULL,
+                    kettles_planned DOUBLE PRECISION NOT NULL DEFAULT 0
+                        CHECK (kettles_planned >= 0),
+                    expected_pins DOUBLE PRECISION NOT NULL DEFAULT 0
+                        CHECK (expected_pins >= 0),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (production_date, sku),
+                    CONSTRAINT planned_usage_sku_fk
+                        FOREIGN KEY (sku)
+                        REFERENCES sku_master(sku)
+                        ON UPDATE CASCADE
+                        ON DELETE RESTRICT
+                )
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS actual_usage (
+                    id BIGSERIAL PRIMARY KEY,
+                    production_date DATE NOT NULL,
+                    sku TEXT NOT NULL,
+                    actual_pins DOUBLE PRECISION NOT NULL DEFAULT 0
+                        CHECK (actual_pins >= 0),
+                    yield_percent DOUBLE PRECISION NOT NULL DEFAULT 100
+                        CHECK (yield_percent >= 0),
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (production_date, sku),
+                    CONSTRAINT actual_usage_sku_fk
+                        FOREIGN KEY (sku)
+                        REFERENCES sku_master(sku)
+                        ON UPDATE CASCADE
+                        ON DELETE RESTRICT
+                )
+                """
+            )
+
+            # Allow yields above 100% in existing databases.
+            cursor.execute(
+                """
+                ALTER TABLE actual_usage
+                DROP CONSTRAINT IF EXISTS actual_usage_yield_percent_check
+                """
+            )
+
+            cursor.execute(
+                """
+                ALTER TABLE actual_usage
+                ADD CONSTRAINT actual_usage_yield_percent_check
+                CHECK (yield_percent >= 0)
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_planned_date
+                ON planned_usage(production_date)
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_actual_date
+                ON actual_usage(production_date)
+                """
+            )
+
+        connection.commit()
+
+    except Exception:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
+
+
+if __name__ == "__main__":
+    create_database()
+    print("Persistent PostgreSQL database is ready.")
