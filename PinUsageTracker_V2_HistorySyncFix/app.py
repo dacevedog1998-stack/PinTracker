@@ -11,11 +11,18 @@ create_database()
 
 st.set_page_config(
     page_title="Pin Usage Tracker V2",
-    page_icon="📌",
+    page_icon="favicon.png",
     layout="wide",
 )
 
-st.title("📌 Pin Usage Tracker V2")
+col1, col2 = st.columns([1, 12])
+
+with col1:
+    st.image("favicon.png", width=45)
+
+with col2:
+    st.title("Pin Usage Tracker")
+    
 st.caption("Planned kettles, expected pins, yield-adjusted expectation and actual pin usage.")
 
 selected_date = st.date_input(
