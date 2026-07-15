@@ -105,10 +105,7 @@ def create_database() -> None:
                     actual_pins DOUBLE PRECISION NOT NULL DEFAULT 0
                         CHECK (actual_pins >= 0),
                     yield_percent DOUBLE PRECISION NOT NULL DEFAULT 100
-                        CHECK (
-                            yield_percent >= 0
-                            AND yield_percent <= 100
-                        ),
+                        CHECK (yield_percent >= 0),
                     notes TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -119,6 +116,22 @@ def create_database() -> None:
                         ON UPDATE CASCADE
                         ON DELETE RESTRICT
                 )
+                """
+            )
+
+            # Allow yields above 100% in existing databases.
+            cursor.execute(
+                """
+                ALTER TABLE actual_usage
+                DROP CONSTRAINT IF EXISTS actual_usage_yield_percent_check
+                """
+            )
+
+            cursor.execute(
+                """
+                ALTER TABLE actual_usage
+                ADD CONSTRAINT actual_usage_yield_percent_check
+                CHECK (yield_percent >= 0)
                 """
             )
 

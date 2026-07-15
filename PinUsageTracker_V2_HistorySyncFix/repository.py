@@ -349,9 +349,9 @@ def save_actual_rows(
                     float(row["Actuals"]),
                     0.0,
                 )
-                yield_percent = min(
-                    max(float(row["Yield %"]), 0.0),
-                    100.0,
+                yield_percent = max(
+                    float(row["Yield %"]),
+                    0.0,
                 )
                 notes = str(
                     row.get("Notes", "") or ""

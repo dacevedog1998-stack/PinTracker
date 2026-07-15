@@ -97,10 +97,10 @@ with st.form(
             ),
             "Yield %": st.column_config.NumberColumn(
                 min_value=0.0,
-                max_value=100.0,
                 step=0.1,
                 format="%.2f",
                 required=True,
+                help="Yield may be above 100%.",
             ),
             "New Expected": st.column_config.NumberColumn(
                 format="%.2f",

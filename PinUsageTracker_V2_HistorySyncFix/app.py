@@ -8,24 +8,12 @@ from repository import get_summary_for_date
 from ui_helpers import build_summary_dataframe
 
 
-# =========================================================
-# FILE PATHS
-# =========================================================
-
 BASE_DIR = Path(__file__).resolve().parent
 FAVICON_PATH = BASE_DIR / "favicon.png"
 
 
-# =========================================================
-# DATABASE
-# =========================================================
-
 create_database()
 
-
-# =========================================================
-# PAGE CONFIG
-# =========================================================
 
 st.set_page_config(
     page_title="Pin Usage Tracker",
@@ -33,10 +21,6 @@ st.set_page_config(
     layout="wide",
 )
 
-
-# =========================================================
-# HEADER
-# =========================================================
 
 col_logo, col_title = st.columns(
     [1, 12],
@@ -50,9 +34,8 @@ with col_logo:
     )
 
 with col_title:
-    st.title(
-        "Pin Usage Tracker"
-    )
+    st.title("Pin Usage Tracker")
+
 
 st.caption(
     "Planned kettles, expected pins, yield-adjusted expectation "
@@ -60,19 +43,11 @@ st.caption(
 )
 
 
-# =========================================================
-# DATE SELECTION
-# =========================================================
-
 selected_date = st.date_input(
     "Production Date",
     value=date.today(),
 )
 
-
-# =========================================================
-# LOAD SUMMARY
-# =========================================================
 
 summary_rows = get_summary_for_date(
     str(selected_date)
@@ -83,92 +58,52 @@ summary_df = build_summary_dataframe(
 )
 
 
-# =========================================================
-# EMPTY STATE
-# =========================================================
-
 if summary_df.empty:
-
     st.info(
         "No planning or actual production has been saved for this date. "
         "Use Daily Planning and Production Actuals from the left menu."
     )
-
     st.stop()
 
 
-# =========================================================
-# TOTALS
-# =========================================================
-
-total_kettles = summary_df[
-    "Kettle Planned"
-].sum()
-
-
-total_expected = summary_df[
-    "Expected Pins"
-].sum()
-
-
-total_new_expected = summary_df[
-    "New Expected"
-].sum()
-
-
-total_actual = summary_df[
-    "Actuals"
-].sum()
+total_kettles = summary_df["Kettle Planned"].sum()
+total_expected = summary_df["Expected Pins"].sum()
+total_new_expected = summary_df["New Expected"].sum()
+total_actual = summary_df["Actuals"].sum()
 
 
 weighted_yield = (
-
     (
         summary_df["Yield %"]
-        *
-        summary_df["Expected Pins"]
+        * summary_df["Expected Pins"]
     ).sum()
-
-    /
-
-    total_expected
-
+    / total_expected
     if total_expected > 0
-
     else 0
 )
 
 
-# =========================================================
-# KPI CARDS
-# =========================================================
-
 col1, col2, col3, col4, col5 = st.columns(5)
-
 
 col1.metric(
     "Kettles Planned",
     f"{total_kettles:,.2f}",
 )
 
-
 col2.metric(
     "Expected Pins",
     f"{total_expected:,.2f}",
 )
-
 
 col3.metric(
     "Yield",
     f"{weighted_yield:.2f}%",
 )
 
-
 col4.metric(
     "New Expected",
     f"{total_new_expected:,.2f}",
 )
-
 
 col5.metric(
     "Actual Pins",
@@ -177,13 +112,7 @@ col5.metric(
 )
 
 
-# =========================================================
-# SUMMARY TABLE
-# =========================================================
-
-st.subheader(
-    "Daily Summary"
-)
+st.subheader("Daily Summary")
 
 
 st.dataframe(
@@ -191,58 +120,35 @@ st.dataframe(
     width="stretch",
     hide_index=True,
     column_config={
-
-        "Kettle Planned":
-            st.column_config.NumberColumn(
-                format="%.2f"
-            ),
-
-        "Expected Pins":
-            st.column_config.NumberColumn(
-                format="%.2f"
-            ),
-
-        "Yield %":
-            st.column_config.NumberColumn(
-                format="%.2f%%"
-            ),
-
-        "New Expected":
-            st.column_config.NumberColumn(
-                format="%.2f"
-            ),
-
-        "Actuals":
-            st.column_config.NumberColumn(
-                format="%.2f"
-            ),
-
-        "Variance":
-            st.column_config.NumberColumn(
-                format="%.2f",
-                help="Actual Pins minus New Expected.",
-            ),
+        "Kettle Planned": st.column_config.NumberColumn(
+            format="%.2f"
+        ),
+        "Expected Pins": st.column_config.NumberColumn(
+            format="%.2f"
+        ),
+        "Yield %": st.column_config.NumberColumn(
+            format="%.2f%%"
+        ),
+        "New Expected": st.column_config.NumberColumn(
+            format="%.2f"
+        ),
+        "Actuals": st.column_config.NumberColumn(
+            format="%.2f"
+        ),
+        "Variance": st.column_config.NumberColumn(
+            format="%.2f",
+            help="Actual Pins minus New Expected.",
+        ),
     },
 )
 
 
-# =========================================================
-# DOWNLOAD
-# =========================================================
-
 st.download_button(
-
     label="Download Summary CSV",
-
     data=summary_df.to_csv(
         index=False,
         float_format="%.2f",
     ).encode("utf-8"),
-
-    file_name=(
-        f"pin_usage_summary_"
-        f"{selected_date}.csv"
-    ),
-
+    file_name=f"pin_usage_summary_{selected_date}.csv",
     mime="text/csv",
 )
